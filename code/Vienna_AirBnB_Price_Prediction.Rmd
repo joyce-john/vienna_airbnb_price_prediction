@@ -14,9 +14,9 @@ The Vienna AirBnb data has approximately 10.000 observations after cleaning and 
 
 ```{r setup}
 
-# set directories
-raw_data_dir <- "/data/raw/"
-clean_data_dir <- "data/clean/"
+# set data directories (RMDs always set their own dir as the working dir)
+raw_data_dir <- "../data/raw/"
+clean_data_dir <- "../data/clean/"
 
 # load libraries
 library(tidyverse)
