@@ -2,23 +2,37 @@
 title: "Vienna AirBnB Price Prediction"
 author: "John Joyce"
 date: "7/20/2021"
-output: html_document
+output: 
+  html_document:
+    theme: "cosmo"
+    toc: true
+    toc_depth: 2
+    toc_float: true
+    code_folding: hide
 ---
 
+```{r document setup}
 
+# show code but not console output in report
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+```
 
 # Introduction  
+
 My task is to help a company offering small and mid-size apartments find the right price for their new AirBnb units in Vienna. I do this by building a model for predicting Airbnb prices with publicly available data from [InsideAirbnb](http://insideairbnb.com/get-the-data.html). We can run the model on the client's apartments to figure out what an appropriate price is for each unit.  
   
 The Vienna AirBnb data has approximately 10.000 observations after cleaning and preparation. The **mean price** is about €68 and the **average number of reviews** is 33. However, 17% of the apartments in the data have 0 reviews, just like the client's properties.
 
-```{r setup}
+```{r load data and packages}
 
 # set data directories (RMDs always set their own dir as the working dir)
 raw_data_dir <- "../data/raw/"
 clean_data_dir <- "../data/clean/"
 
 # load libraries
+library(knitr)
+library(kableExtra)
 library(tidyverse)
 library(caret)
 library(ranger)
@@ -28,5 +42,159 @@ df <- read_csv(paste0(raw_data_dir,'listings.csv.gz'))
 
 ```
 
-# Data Cleaning
+# Cleaning and Filtering  
 
+In the cleaning and filtering stage, I need to accomplish two goals:  
+  
+* adjusting the sample to be more representative of the properties of the properties we want to model  
+* preparing the data for machine learning  
+
+## Adjusting the Sample
+
+The data contains 61 different property types. But our client only has one property type: **apartment**. We'll trim the sample down to apartment-style properties.  
+
+``` {r property types table}
+
+# 'Entire apartment' + 'Private room in apartment' are 87% of obs, 
+# there are 59 other types, and each is <= 2.3% of total obs
+
+df %>% 
+  group_by(property_type) %>% 
+  summarize(count = n()) %>% 
+  arrange(desc(count)) %>% 
+  kable() %>% 
+  kable_material() %>% 
+  scroll_box(height = "350px")
+
+```
+  
+  
+Fortunately, 87% of the data are **Entire apartment** or **private room in apartment**, plus there are a few more **serviced apartments**. We still have a large sample size. I keep any property which is an apartment of some kind, and I filter out anything that is not.  
+
+```{r filter property types}
+
+# identify apartments with string detection on property_type column and recode any other value to 'Other'
+df <-
+  df %>% 
+  mutate(property_type = ifelse(str_detect(property_type, 'apartment|Apartment'), 'Apartment', 'Other'))
+
+# keep only apartments
+df <- 
+  df %>%
+  filter(property_type == 'Apartment')
+
+```  
+
+A quick look at the **room_type** column reveal something odd. If our data has been filtered to apartments, why do we have the **Hotel room** room type? 
+
+```{r examine room type}
+
+# look at the room_type column... why do we have hotel rooms?
+df %>% 
+  group_by(room_type) %>% 
+  summarize(count = n()) %>% 
+  arrange(desc(count)) %>% 
+  kable() %>% 
+  kable_material()
+
+```
+  
+I clean this up by dropping **Hotel room** observations and renaming **Entire home/apt** to **Entire apartment** to be more accurate.  
+
+```{r drop hotel rooms}
+
+# discard hotel rooms with a negated filter
+df <-
+  df %>% 
+  filter(!room_type == 'Hotel room')
+
+# rename 'Entire home/apt' to 'Entire apartment'
+df <-
+  df %>% 
+  mutate(room_type = ifelse(room_type == 'Entire home/apt', 'Entire apartment', room_type))
+
+
+```
+
+
+The client's apartments accommodate **two to six guests**. Therefore, I filter out any apartments which are not in this range. 
+
+```{r filter accommodates}
+
+# filter to include apartments which meet our criteria: accomodates 2-6 people
+df <- 
+  df %>% 
+  filter(accommodates %in% 2:6)
+
+```
+
+The client's apartments all have at least one bathroom. We can filter out the small number of apartments which have zero bathrooms or just a half-bath (dude, who is renting these...) and also do some basic cleaning on the **bathrooms_text** column while we are at it. Currently, this column is an ugly string with values such as *1 bath* or *2.5 shared baths*. I convert these values to a numeric stored in **bathrooms** and add a flag for apartments which have shared bath facilities.
+
+```{r filter bathrooms}
+
+# extract number of bathrooms from string column, store in numeric column
+df <-
+  df %>% 
+  mutate(bathrooms = str_extract(bathrooms_text, '\\d\\.*\\d*')) 
+
+# add flag for shared bathrooms
+df <- 
+  df %>% 
+  mutate(shared_bathroom = ifelse(str_detect(bathrooms_text, 'shared'), 1, 0))
+
+# keep only apartments with one more more bathrooms
+df <- 
+  df %>% filter(bathrooms >= 1)
+
+```
+
+I also filter out apartments which have **extreme values for price**. The client does not have luxury apartments, so having luxury apartments in the sample for the pricing model is not helpful. These values (whether they are real values for luxury apartments or data entry mistakes) are going to hurt the accuracy of the models. I set the cutoff at €600 per night - which comes out to €100 - €300 per person for apartments which accommodate 2 - 6 guests.   
+
+```{r drop extreme values for price}
+
+# strip dollar signs from values in price column by taking substring starting at second position ("$100" --> "100")
+df <-
+  df %>% 
+  mutate(price = str_sub(price, start = 2))
+
+# convert to numeric
+df$price <- as.numeric(df$price)
+
+# check for NAs, it turns out there are 19. small number, let's drop them
+# sum(is.na(df$price))
+
+# drop price NAs
+df <-
+  df %>% 
+  filter(!is.na(price))
+
+# visualize price histogram with annotated cutoff point
+df %>% 
+    ggplot(aes(x = price)) + 
+    geom_histogram() +
+    annotate("segment", x = 600, xend = 600, y = 0, yend = 2000, size = 1.5, color = "red") +
+    annotate("text", x = 600, y = 2200, label = "Luxury Price Cutoff", size = 6, color = "red")
+  
+
+# we should drop extreme values to improve our predictions
+# but also because luxury apartments are not relevant comparisons for our business case
+df <-
+  df %>% 
+  filter(price <= 600)
+
+
+```
+
+## Prep data for machine learning
+
+The data needs to be in a clean format before it can be passed to a model. The key tasks are:  
+  
+* dealing with NAs  
+* feature engineering with clean variable names/types  
+* dropping unneeded variables  
+
+Some important columns have NAs. When these occur in the **price** column, they must be dropped. When these occur in the columns which are used as predictive features, they can be dropped or imputed if the number is relatively small. However, there is one difficult case: the **bedrooms** column has more than 1000 NAs in the original data. This is about 10% of the data after filtering. I take a conservative approach here: I won't impute or drop these values, because there could be a systemic reason that the information is missing (ex. hosts are hiding the information because it's unfavorable). I leave these observations in the data, and I set **NA** as a **factor level** when doing prediction. 
+  
+I do a small amount of feature engineering. Every row in the **amenities** column contains a list which no machine learning tool will be able to interpret. I make dummy variables for every unique value in **amenities**, which describes all the small features that are included with an Airbnb (appliances, sound systems, patios, etc.) To get the most out of this information, I consolidate amenities which are extremely similar, such as refrigerators of different brands and different varieties of stoves. Many variables are renamed to replace spaces with underscores.  
+  
+I drop unneeded variables to make the data easier to work with. Using domain knowledge or common sense, I drop anything I am confident will not help to predict **price**. For the client's case, I also drop **review scores** columns. This is really unfortunate, because these reviews would be useful predictive features. However, the client's apartments are **new to the market** and do not have any reviews. It would not be reasonable to impute values for the client to run the prediction model: we have no idea *how accurate customers will find the listing* or *how clean they will find it* or *how much they will like it overall*. I decide to keep the **number_of_reviews** variable because we do have this information (it's zero). 
