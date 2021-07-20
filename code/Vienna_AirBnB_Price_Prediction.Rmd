@@ -1,0 +1,32 @@
+---
+title: "Vienna AirBnB Price Prediction"
+author: "John Joyce"
+date: "7/20/2021"
+output: html_document
+---
+
+
+
+# Introduction  
+My task is to help a company offering small and mid-size apartments find the right price for their new AirBnb units in Vienna. I do this by building a model for predicting Airbnb prices with publicly available data from [InsideAirbnb](http://insideairbnb.com/get-the-data.html). We can run the model on the client's apartments to figure out what an appropriate price is for each unit.  
+  
+The Vienna AirBnb data has approximately 10.000 observations after cleaning and preparation. The **mean price** is about €68 and the **average number of reviews** is 33. However, 17% of the apartments in the data have 0 reviews, just like the client's properties.
+
+```{r setup}
+
+# set directories
+raw_data_dir <- "/data/raw/"
+clean_data_dir <- "data/clean/"
+
+# load libraries
+library(tidyverse)
+library(caret)
+library(ranger)
+
+# load data
+df <- read_csv(paste0(raw_data_dir,'listings.csv.gz'))
+
+```
+
+# Data Cleaning
+
