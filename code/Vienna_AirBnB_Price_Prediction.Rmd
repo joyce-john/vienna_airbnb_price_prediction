@@ -148,7 +148,7 @@ df <-
 
 ```
 
-I also filter out apartments which have **extreme values for price**. The client does not have luxury apartments, so having luxury apartments in the sample for the pricing model is not helpful. These values (whether they are real values for luxury apartments or data entry mistakes) are going to hurt the accuracy of the models. I set the cutoff at €600 per night - which comes out to €100 - €300 per person for apartments which accommodate 2 - 6 guests.   
+I also filter out apartments which have **extreme values for price**. The client does not have super expensive luxury apartments, and having luxury apartments in the sample for the pricing model is not helpful. These values (whether they are real values for luxury apartments or data entry mistakes) are going to hurt the accuracy of the model. I set the cutoff at €600 per night - which comes out to €100 - €300 per person for apartments which accommodate 2 - 6 guests.     
 
 ```{r drop extreme values for price}
 
@@ -193,8 +193,152 @@ The data needs to be in a clean format before it can be passed to a model. The k
 * feature engineering with clean variable names/types  
 * dropping unneeded variables  
 
-Some important columns have NAs. When these occur in the **price** column, they must be dropped. When these occur in the columns which are used as predictive features, they can be dropped or imputed if the number is relatively small. However, there is one difficult case: the **bedrooms** column has more than 1000 NAs in the original data. This is about 10% of the data after filtering. I take a conservative approach here: I won't impute or drop these values, because there could be a systemic reason that the information is missing (ex. hosts are hiding the information because it's unfavorable). I leave these observations in the data, and I set **NA** as a **factor level** when doing prediction. 
+Some important columns have NAs. When these occur in the **price** column, they must be dropped. When these occur in the columns which are used as predictive features, they can be dropped or imputed if the number is relatively small. However, there is one difficult case: the **bedrooms** column has more than 1000 NAs in the original data. This is about 10% of the data after filtering. I take a conservative approach here: I won't impute or drop these values, because there could be a systemic reason that the information is missing (ex. hosts are hiding the information because it's unfavorable). I leave these observations in the data, and I set **NA** as a **factor level** when doing prediction.  
+
+I reduce the size of the dataframe to only include columns which might be useful for the modeling task. (I also keep the ID and name columns in case we ever want to diagnose and discuss individual observations.)   
+
+```{r select useful columns}
+
+# drop a bunch of variables we won't use to make wrangling amenities a little easier
+# do this by selecting only the variables we are interested in
+df <- 
+  df %>% 
+  select(id, 
+         name, 
+         neighbourhood_cleansed, 
+         room_type, 
+         accommodates,
+         bathrooms,
+         bedrooms,
+         beds,
+         amenities,
+         price,
+         instant_bookable,
+         number_of_reviews,
+         shared_bathroom)
+
+```
   
-I do a small amount of feature engineering. Every row in the **amenities** column contains a list which no machine learning tool will be able to interpret. I make dummy variables for every unique value in **amenities**, which describes all the small features that are included with an Airbnb (appliances, sound systems, patios, etc.) To get the most out of this information, I consolidate amenities which are extremely similar, such as refrigerators of different brands and different varieties of stoves. Many variables are renamed to replace spaces with underscores.  
+I do a small amount of feature engineering. Every row in the **amenities** column contains a messy string which no machine learning tool will be able to use as a predictive feature.  
+
+![](../docs/images/raw_amenities_screenshot.jpg)
+
+I make binary variables for every unique value in **amenities**, which describes all the small features that are included with an Airbnb (appliances, sound systems, patios, etc.) To get the most out of this information, I consolidate amenities which are extremely similar, such as refrigerators of different brands and different varieties of stoves. Many variables are renamed to replace spaces with underscores. 
+
+```{r binary variables for amenities}
+
+# first create unique list of all amenities in the data
+# the regex pattern captures amenities of any number of words
+amenities_unique <-
+  unique(
+    unlist(
+      df$amenities %>% str_extract_all('(?<=")(\\w+\\s*)*(?=")')
+    )
+  )
+
+# then iterate over the list and create a new column for each unique amenity and fill values with this logic:
+# in the new column, if the amenity is detected as a string in the original "amenities" at this row, set value to 1
+# else set value to 0
+for (i in amenities_unique){
+  df <- 
+    df %>% 
+    mutate(!! i := ifelse(str_detect(amenities, !! i), 1, 0))
+}
+
+# mutate columns to aggregate amenities - refrigerators, ovens, stoves of different types
+# this checks for any type of refrigerator, oven or stove unit, etc. and sets value to 1 if present
+# example: Refrigerator = 1 if it is a refrigerator, Siemens refrigerator, Gorenje refrigerator, Miele refrigerator, etc...
+df <-
+  df %>% 
+  mutate(Refrigerator = ifelse(str_detect(amenities, "Refrigerator|refrigerator"), 1, 0)) %>% 
+  mutate(Oven = ifelse(str_detect(amenities, "Oven|oven"), 1, 0)) %>% 
+  mutate(Stove = ifelse(str_detect(amenities, "Stove|stove"), 1, 0)) %>% 
+  mutate(`Body Soap` = ifelse(str_detect(amenities, "Body soap|body soap|Shower gel"), 1, 0)) %>% 
+  mutate(Shampoo = ifelse(str_detect(amenities, "Shampoo|shampoo"), 1, 0)) %>% 
+  mutate(Conditioner = ifelse(str_detect(amenities, "Conditioner|conditioner"), 1, 0)) %>% 
+  mutate(Netflix = ifelse(str_detect(amenities, "Netflix|netflix"), 1, 0)) %>% 
+  mutate(`Amazon Prime Video` = ifelse(str_detect(amenities, "Amazon Prime Video"), 1, 0)) %>% 
+  mutate(`Air conditioning` = ifelse(str_detect(amenities, "Air conditioning|air conditioning|Window AC"), 1, 0)) %>% 
+  mutate(TV = ifelse(str_detect(amenities, "TV"), 1, 0)) %>% 
+  mutate(`Hot tub` = ifelse(str_detect(amenities, "Hot tub|hot tub"), 1, 0)) %>% 
+  mutate(`Sound system` = ifelse(str_detect(amenities, "Sound system|sound system"), 1, 0)) %>% 
+  mutate(`Free parking` = ifelse(str_detect(amenities, "Parking|parking") & str_detect(amenities, "Free|free"), 1, 0)) %>% 
+  mutate(`Paid parking` = ifelse(str_detect(amenities, "Parking|parking") & str_detect(amenities, "Paid|paid"), 1, 0))
+
+
+# vector of vars to drop: all the hyper-specific appliances which have been aggregated into more general amenities
+vars_to_drop <- c('Cable TV', 
+                  'Shower gel', 
+                  'Zanussi oven', 
+                  'Zanussi electric stove', 
+                  'Zanussi refrigerator',
+                  'Window AC unit',
+                  'Electric stove',
+                  'HDTV with Netflix',
+                  'Central air conditioning',
+                  'Nivea body soap',
+                  'Bodyshop body soap',
+                  'Stainless steel oven',
+                  'TV with Netflix',
+                  'HDTV',
+                  'Induction stove',
+                  'SIEMENS oven',
+                  'AEG refrigerator',
+                  'Duschgel body soap',
+                  'Private hot tub',
+                  'Gorenje induction stove',
+                  'Gorenje refrigerator',
+                  'Portable air conditioning',
+                  'Cerankochfeld electric stove',
+                  'Siemens oven',
+                  'Siemens refrigerator',
+                  'Oranier induction stove',
+                  'Rituals body soap',
+                  'Rituals shampoo',
+                  'variouse body soap',
+                  'various conditioner',
+                  'Bauknecht refrigerator',
+                  'TV with Chromecast',
+                  'Miele refrigerator',
+                  'Paid parking off premises',                           
+                  'Free parking on premises',                                                     
+                  'Paid parking on premises',                           
+                  'TV with standard cable',                              
+                  'Paid parking garage off premises',                   
+                  'Paid street parking off premises',                    
+                  'HDTV with standard cable',                           
+                  'Grundig Ovation sound system with aux',               
+                  'Stainless steel electric stove',                     
+                  'Paid parking lot on premises',                        
+                  'Sound system with aux',                              
+                  'Free parking garage on premises',                                            
+                  'Paid parking garage on premises',                     
+                  'Sound system with Bluetooth and aux',                
+                  'Samsung TV with integrated sound system sound system',
+                  'Philip Starck Parrot Bluetooth sound system',        
+                  'SAVON PUR VEGETAL ROSE DE MAI body soap',             
+                  'Stainless steel gas stove',                          
+                  'Gorenje stainless steel oven',                        
+                  'Paid parking lot off premises',                      
+                  'LG sound system with Bluetooth and aux',              
+                  'Yamaha Bluetooth sound system',                      
+                  'Gorenje stainless steel electric stove',              
+                  'HDTV with Amazon Prime Video',                       
+                  'Stainless steel induction stove',                     
+                  'Miele stainless steel oven',                         
+                  'Miele stainless steel induction stove',
+                  'Free street parking',        
+                  'Bluetooth sound system',                
+                  'amenities') # we don't need the original amenities column anymore
+
+# drop the vars using the vector 
+df <- 
+    df %>% 
+    select(-all_of(vars_to_drop))
+
+# rename columns: replace all spaces with underscores
+names(df) <- str_replace_all(names(df), '\\s', '_')
+
+```
   
 I drop unneeded variables to make the data easier to work with. Using domain knowledge or common sense, I drop anything I am confident will not help to predict **price**. For the client's case, I also drop **review scores** columns. This is really unfortunate, because these reviews would be useful predictive features. However, the client's apartments are **new to the market** and do not have any reviews. It would not be reasonable to impute values for the client to run the prediction model: we have no idea *how accurate customers will find the listing* or *how clean they will find it* or *how much they will like it overall*. I decide to keep the **number_of_reviews** variable because we do have this information (it's zero). 
