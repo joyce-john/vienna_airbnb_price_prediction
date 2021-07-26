@@ -20,9 +20,10 @@ knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 
 # Introduction  
 
-My task is to help a company offering small and mid-size apartments find the right price for their new AirBnb units in Vienna. I do this by building a model for predicting Airbnb prices with publicly available data from [InsideAirbnb](http://insideairbnb.com/get-the-data.html). We can run the model on the client's apartments to figure out what an appropriate price is for each unit.  
+My task is to help a company offering small and mid-size apartments find the right price for their new AirBnb units in Vienna. I do this by building a model for predicting Airbnb prices with publicly available data from [InsideAirbnb](http://insideairbnb.com/get-the-data.html). We can run the model on the client's apartments to figure out what an appropriate price is for each unit.       
   
-The Vienna AirBnb data has approximately 10.000 observations after cleaning and preparation. The **mean price** is about €68 and the **average number of reviews** is 33. However, 17% of the apartments in the data have 0 reviews, just like the client's properties.
+The Vienna AirBnb data has approximately 10.000 observations after cleaning and preparation. The **mean price** is about €68 and the **average number of reviews** is 33. However, 17% of the apartments in the data have 0 reviews, just like the client's properties.  
+
 
 ```{r load data and packages}
 
@@ -189,11 +190,10 @@ df <-
 
 The data needs to be in a clean format before it can be passed to a model. The key tasks are:  
   
-* dealing with NAs  
-* feature engineering with clean variable names/types  
-* dropping unneeded variables  
-
-Some important columns have NAs. When these occur in the **price** column, they must be dropped. When these occur in the columns which are used as predictive features, they can be dropped or imputed if the number is relatively small. However, there is one difficult case: the **bedrooms** column has more than 1000 NAs in the original data. This is about 10% of the data after filtering. I take a conservative approach here: I won't impute or drop these values, because there could be a systemic reason that the information is missing (ex. hosts are hiding the information because it's unfavorable). I leave these observations in the data, and I set **NA** as a **factor level** when doing prediction.  
+* dropping unneeded variables 
+* engineering useful features from an ugly string column  
+* dealing with NAs 
+  
 
 I drop unneeded variables to make the data easier to work with. Using domain knowledge or common sense, I drop anything I am confident will not help to predict **price**. For the client's case, I also drop **review scores** columns. Typically, reviews  would be highly useful features for modeling price. But in the client's case, we are trying to predict the appropriate price for properties which don't have any reviews because they are new to the market. We can't confidently impute values for the missing review scores: we don't know how much guests will enjoy these particular properties, how accurate they will find the listing, how well the client will perform the host duties overall, etc. I decide to keep the **number_of_reviews** variable because we do have this information (it's zero).  
 
@@ -219,11 +219,11 @@ df <-
 
 ```
   
-I do a small amount of feature engineering. Every row in the **amenities** column contains a messy string which no machine learning tool will be able to use as a predictive feature.  
+I do a small amount of feature engineering. Every row in the **amenities** column contains a list of the property's amenities (appliances, sound systems, patios, etc.) as one long string. A machine learning tool won't be able to use these values as predictive features.  
 
 ![](../docs/images/raw_amenities_screenshot.jpg)
 
-I make binary variables for every unique value in **amenities**, which describes all the small features that are included with an Airbnb (appliances, sound systems, patios, etc.) To get the most out of this information, I consolidate amenities which are extremely similar, such as refrigerators of different brands and different varieties of stoves. Many variables are renamed to replace spaces with underscores. 
+I split the string and make a list of all unique values in **amenities**. Then, I make binary variables for every unique value. To get the most out of this information, I consolidate amenities which are extremely similar, such as refrigerators of different brands and different varieties of stoves. Many variables are renamed to replace spaces with underscores. 
 
 ```{r binary variables for amenities}
 
@@ -342,7 +342,7 @@ names(df) <- str_replace_all(names(df), '\\s', '_')
 ```
   
 
-Now that I'm done adjusting the sample and manipulating the data, I take one last check for NAs in the features.  
+Now that I'm done adjusting the sample and features, I take one last check for NAs.  
 
 ```{r last check for NAs}
 
@@ -379,3 +379,261 @@ I save the clean data to a separate CSV file.
 write_csv(df, paste0(clean_data_dir,'airbnb_vienna_midsize_clean.csv'))
 
 ```
+
+# Functional Form and Interactions
+
+I do not make any adjustments to the functional form of the numeric features. I examine scatterplots of numeric *x* variables and the *y* variable, **price**, with loess smoothing, and I don't find any evidence to suggest that a transformation (such a log, square, or cubic) would better accommodate the pattern of association between the variables. There are two numeric variables with skewed distributions, **number_of_reviews** and **price**, but log transformations of these variables don't seem to help fit any meaningful patterns.  
+
+I decide to interact some variables with **neighbourhood**. The logic here is that property features be extremely important in some areas and less important in others. One crystal clear example is **free parking**. In some areas of the city, parking spots are precious. The graph below mean Airbnb prices, with and without **free parking**, by neighbourhood: 
+
+```{r interaction of free parking and neighborhood}
+
+# define a function to create plots which help identify potential interactions
+# this function was written by Gabor Bekes and  Gabor Kezdi and modified slightly
+price_diff_by_variables <- function(df, factor_var, dummy_var){
+
+  factor_var <- as.name(factor_var)
+  dummy_var <- as.name(dummy_var)
+  
+  stats <- df %>%
+    group_by(!!factor_var, !!dummy_var) %>%
+    dplyr::summarize(Mean = mean(price, na.rm=TRUE),
+                     se = sd(price)/sqrt(n()))
+  
+  stats[,2] <- lapply(stats[,2], factor)
+  
+  ggplot(stats, aes_string(colnames(stats)[1], colnames(stats)[3], fill = colnames(stats)[2]))+
+    geom_bar(stat='identity', position = position_dodge(width=0.9))+
+    geom_errorbar(aes(ymin=Mean-(1.96*se),ymax=Mean+(1.96*se)),
+                  position=position_dodge(width = 0.9), width = 0.25)+
+    ylab('Mean Price')+
+    theme_bw()+
+    theme(panel.grid.major=element_blank(),
+          panel.grid.minor=element_blank(),
+          panel.border=element_blank(),
+          axis.line=element_line(),
+          axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) + 
+    labs(x = 'Neighbourhood') + 
+    scale_fill_grey()
+}
+
+# call the function which returns a ggplot
+price_diff_by_variables(df, "neighbourhood_cleansed", "Free_parking")
+
+
+```  
+
+When I set the model formulas, I will include a number of interaction terms which involve the **neighbourhood** variable. These interaction terms have the potential to improve predictive performance, and methods like LASSO and Random Forest can select the terms which are most useful.  
+
+# Model Building
+
+## Training and Test Sets
+
+The data needs to be split into training and test sets. The test set will only be used for model evaluation.  
+
+```{r create tranining and test sets}
+
+# set the seed for reproducibility
+set.seed(1991)
+
+# create an index for splitting the data. let's do a classic 80/20 split
+# use as.integer() to coerce the matrix into a vector
+index <- as.integer(
+  createDataPartition(df$price, times = 1, p = 0.8, list = FALSE)
+)
+
+# create sets with index
+train_set <- df[index,]
+test_set <- df[-index,]
+
+```  
+
+## Model Formulas
+
+I put the variables into three different groups and create model formulas with increasing complexity:  
+
+* basic property characteristics  
+* basic property characteristics + amenities  
+* basic property characteristics + amenities + neighborhood interactions  
+
+
+```{r set model formulas}
+
+# put variables in groups to make model-building easier
+
+# basic characteristics of the listing
+basic_vars <- c('neighbourhood_cleansed', 
+                'room_type', 
+                'accommodates', 
+                'bathrooms', 
+                'bedrooms', 
+                'beds', 
+                'instant_bookable', 
+                'shared_bathroom',
+                'number_of_reviews')
+
+
+# dummy variables for the amenities (fridges, parking, etc.) in columns 15 - 123
+amenities <- colnames(df[15:123])
+
+# interactions with neighbourhood
+# I can't explore all possible interactions, so I'm only using basic property stats + parking
+neighbourhood_interactions <- c('room_type*neighbourhood_cleansed', 
+                                'accommodates*neighbourhood_cleansed', 
+                                'bathrooms*neighbourhood_cleansed', 
+                                'bedrooms*neighbourhood_cleansed', 
+                                'beds*neighbourhood_cleansed', 
+                                'instant_bookable*neighbourhood_cleansed', 
+                                'shared_bathroom*neighbourhood_cleansed',
+                                'number_of_reviews*neighbourhood_cleansed',
+                                'Free_parking*neighbourhood_cleansed',
+                                'Paid_parking*neighbourhood_cleansed')
+
+
+# simplify model formulas with these groups
+predictors_1 <- basic_vars
+predictors_2 <- c(basic_vars, amenities)
+predictors_3 <- c(basic_vars, amenities, neighbourhood_interactions)
+
+
+# set formulas
+
+# formula 1: basic variables
+formula_1 <- 
+  as.formula(
+    paste0('price ~ ', 
+           paste0(predictors_1,
+                  collapse = ' + ')))
+
+# formula 2: basic variables + amenities
+formula_2 <- as.formula(
+  paste0('price ~ ', 
+         paste0(predictors_2,
+                collapse = ' + ')))
+
+# formula 3: basic variables + amenities + neighbourhood interactions
+formula_3 <- as.formula(
+  paste0('price ~ ', 
+         paste0(predictors_3,
+                collapse = ' + ')))
+
+
+```  
+
+## Tuning Parameters
+
+I'll be training models with the `caret` package. I'll use five-fold cross-validation to select the best configuration from a range of tuning parameters for each model.  
+
+For an **OLS** model, there is no need to specify tuning parameters.  
+For the **LASSO** model, `caret` will find the optimal penalty term (λ) for reducing model complexity.    
+For the **random forest** models, `caret` will find the optimal number of variables (*m*) to consider at each split.  
+
+```{r set model parameters}
+
+# set trainControl to do 5 folds of cross validation
+train_control <- trainControl(method = "cv", number = 5)
+
+# tuneGrid for LASSO
+# try lambdas all the way up 1, we need to allow LASSO to basically zero things out if appropriate
+tunegrid_lasso <-  expand.grid("alpha" = 1, "lambda" = seq(0.05, 1, by = 0.01))
+
+# set tunegrid for random forest: simple model
+# for the simple model, we have 9 features. we may consider sqrt(9) = 3 as a potential value for m
+# let's at least give it two options: 3 and 4. if we go any higher, the trees may get too correlated
+tune_grid_rf_simple <- expand.grid(
+  .mtry = c(3, 4),
+  .splitrule = "variance",
+  .min.node.size = c(5, 10)
+)
+
+# set tunegrid for random forest: full model
+# for the full model, we have 121 features, we may consider sqrt(121) = 11 as a possible value for m
+# but let's have it try a few values
+tune_grid_rf_full <- expand.grid(
+  .mtry = c(9, 11, 13),
+  .splitrule = "variance",
+  .min.node.size = c(5, 10)
+)
+
+# setting train control for RF - the same as previous train control but with verboseIter = TRUE
+# so I can see the progress running in the console
+train_control_rf <- trainControl(method = "cv", number = 5, verboseIter = TRUE)
+
+
+```  
+
+## Model Training
+
+I'll build a few different types of models with different levels of complexity:  
+
+* **OLS** with basic property characteristics 
+* **OLS** with basic property characteristics + amenities   
+* **OLS** with basic property characteristics + amenities + neighborhood interactions  
+* **LASSO** basic property characteristics + amenities + neighborhood interactions  
+* **Random forest** basic property characteristics   
+* **Random forest** basic property characteristics + amenities  
+
+The **OLS models** are unlikely to be the best performers, but they provide a benchmark against we can compare the LASSO and random forest models. The **LASSO model** is only trained using the most complex formula, because the penalty term will choose the optimal number of coefficients anyway. For the **random forest model**, I'll train a basic version with just the property characteristics and a more complex version which includes amenities. However, I won't pass interaction terms to the random forest model; the splitting process uncovers uncovers interactions automatically.  
+
+```{r train models}
+
+# OLS
+
+# linear model 1: basic predictors
+lm_1 <- caret::train(formula_1,
+                    data = train_set,
+                    method = 'lm',
+                    preProcess = c('center', 'scale'),
+                    trControl = train_control)
+
+# linear model 2: basic predictors + amenities
+lm_2 <- caret::train(formula_2,
+                    data = train_set,
+                    method = 'lm',
+                    preProcess = c('center', 'scale'),
+                    trControl = train_control)
+
+# linear model 3: basic predictors + amenities + neighbourhood interactions
+lm_3 <- caret::train(formula_3,
+                    data = train_set,
+                    method = 'lm',
+                    preProcess = c('center', 'scale'),
+                    trControl = train_control)
+
+# LASSO
+
+# give LASSO all potential x variables (including interactions) and let the algorithm determine which features are important
+lasso_1 <- caret::train(formula_3,
+                       data = train_set,
+                       method = 'glmnet',
+                       preProcess = c('center', 'scale'),
+                       tuneGrid = tunegrid_lasso,
+                       trControl = train_control
+)
+
+# Random Forest
+
+# first train a simple model only using basic property stats
+rf_1 <- train(
+  formula_1,
+  data = train_set,
+  method = "ranger",
+  trControl = train_control_rf,
+  tuneGrid = tune_grid_rf_simple,
+  importance = "impurity"
+)
+
+# second train a complex model using all features (but not interactions, as decision trees uncover these independently)
+rf_2 <- train(
+  formula_2,
+  data = train_set,
+  method = "ranger",
+  trControl = train_control_rf,
+  tuneGrid = tune_grid_rf_full,
+  importance = "impurity"
+)
+
+
+
+```  
+
