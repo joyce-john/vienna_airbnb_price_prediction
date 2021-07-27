@@ -37,6 +37,8 @@ library(kableExtra)
 library(tidyverse)
 library(caret)
 library(ranger)
+library(glmnet)
+library(e1071)
 
 # load data
 df <- read_csv(paste0(raw_data_dir,'listings.csv.gz'))
@@ -369,6 +371,11 @@ df <-
   df %>% 
   drop_na(beds)
 
+# set bedrooms to factor, including NA as a level
+df$bedrooms <- 
+  df$bedrooms %>% 
+  factor(exclude = NULL)
+
 ```  
 
 I save the clean data to a separate CSV file.  
@@ -474,7 +481,7 @@ basic_vars <- c('neighbourhood_cleansed',
 
 
 # dummy variables for the amenities (fridges, parking, etc.) in columns 15 - 123
-amenities <- colnames(df[15:123])
+amenities <- colnames(df[15:121])
 
 # interactions with neighbourhood
 # I can't explore all possible interactions, so I'm only using basic property stats + parking
