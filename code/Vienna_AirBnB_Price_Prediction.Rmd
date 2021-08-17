@@ -430,13 +430,13 @@ price_diff_by_variables(df, "neighbourhood_cleansed", "Free_parking")
 
 ```  
 
-When I set the model formulas, I will include a number of interaction terms which involve the **neighbourhood** variable. These interaction terms have the potential to improve predictive performance, and methods like LASSO and Random Forest can select the terms which are most useful.  
+When I set the model formulas, I will include a number of interaction terms which involve the **neighbourhood** variable. These interaction terms have the potential to improve predictive performance, and methods like LASSO can select the interaction terms which are most useful.  
 
 # Model Building
 
 ## Training and Test Sets
 
-The data needs to be split into training and test sets. The test set will only be used for model evaluation.  
+The data needs to be split into training and test sets. I'll use 80% of the data for training. The 20% remaining in the test set will only be used for model evaluation.  
 
 ```{r create tranining and test sets}
 
@@ -646,6 +646,8 @@ rf_2 <- train(
 
 # Model Evaluation
 
+First, I'll take a look at the model performance in cross validation.
+
 ```{r model performance in cross validation}
 
 # put all models into a list
@@ -669,6 +671,8 @@ results$statistics$RMSE %>%
 
 
 ```  
+
+Next, I'll try the models on the test set data. There are no radical changes in performance in cross validation VS the test set - which is a good sign that the models were not overfit. The random forest (full) model with all available features had the lowest RMSE.
 
 ```{r model performance on test set}
 
@@ -698,8 +702,12 @@ test_set_rmse %>%
 ```  
 # Model Diagnostics
 
+I do some model diagnostics as a sanity check. I examine the **random forest (full)** model because it was the best performer on the test set and therefore the best candidate for use in the business case. I also take a look at the **LASSO** model - the second-best performer - as a point of of comparison.  
+
 
 ## Y vs Y-hat Plots
+
+The Y/Y-hat plot shows how predicted values differ from actual values. If we could create a perfect model, all points would lie on the dotted 45 degree line.
 
 ```{r y y-hat plots for LASSO and RF}
 
@@ -740,6 +748,8 @@ rf_2_pred_vs_actual
 
 ## Top Coefficients in the LASSO Model
 
+To get an idea of which predictors were most impactful in the LASSO model, I look at the top 10 largest coefficient values.
+
 ```{r top coefficients for LASSO}
 
 # get the coefficients from the LASSO model
@@ -763,6 +773,8 @@ lasso_top10_coef
 ```
 
 ## Variable Importance for Random Forest
+
+To get an idea of which predictors were most important to the random forest model, I examine the top ten features in terms of **variable importance** - a metric which describes how important a variable was to reducing RMSE.  
 
 ```{r variable importance for random forest}
 
@@ -798,6 +810,8 @@ rf_2_var_imp_plot
 
 
 ## Partial Dependence Plots for Random Forest
+
+A partial dependence plot offers some insight into the relationship between a single *x* and the random forest's predicted *y* value.
 
 ```{r partial dependence plots for random forest}
 
@@ -836,6 +850,8 @@ pdp_bathrooms_plot
 ```  
 
 ## Comparison of Important Variables
+
+Take a look at the top LASSO coefficients and the top features in terms of **variable importance** from the random forest model. The two methods have some similarities in terms of which *x* variables are most useful in predicting nightly price.
 
 ```{r top 10 variables LASSO vs RF}
 
