@@ -646,7 +646,7 @@ rf_2 <- train(
 
 # Model Evaluation
 
-First, I'll take a look at the model performance in cross validation.
+First, I'll take a look at the model performance in cross validation. The chart shows the RMSE of each model across five folds. I consider the overall **mean RMSE** the most meaningful metric, but it's worth scanning the other statistics. For example, the LASSO model was the second best model overall in terms of mean RMSE, but observe the **max** value: it also had the **worst** single-fold performance! (We could examine the nature of the observations in the individual folds to see *why* LASSO performed so poorly on one of them, but it would make this report a lot longer...)  
 
 ```{r model performance in cross validation}
 
