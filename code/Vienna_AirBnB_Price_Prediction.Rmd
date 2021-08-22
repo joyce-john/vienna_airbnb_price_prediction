@@ -707,7 +707,9 @@ I do some model diagnostics as a sanity check. I examine the **random forest (fu
 
 ## Y vs Y-hat Plots
 
-The Y/Y-hat plot shows how predicted values differ from actual values. If we could create a perfect model, all points would lie on the dotted 45 degree line.
+The Y/Y-hat plot shows how predicted values differ from actual values. If we could create a perfect model, all points would lie on the dotted 45 degree line.  
+
+We see that expensive units are a point of weakness for both models. The points in the upper left quadrant represent observations where the true price (y axis) was fairly high, but the price predicted by our model (x axis) was significantly lower. Also, make note of the lower right quadrant in both charts: beyond €150, the random forest model hardly ever predicted a price that was too high compared to the true price. The LASSO model committed such errors occasionally. It seems our best model is a bit conservative with its valuation of luxury units.  
 
 ```{r y y-hat plots for LASSO and RF}
 
@@ -727,7 +729,7 @@ lasso_pred_vs_actual <-
 # RANDOM FOREST (full) - scatterplot of predicted VS actual values
 rf_2_pred_vs_actual <-
   test_set %>% 
-  mutate(predictions = predictions_lasso_1) %>% 
+  mutate(predictions = predictions_rf2) %>% 
   ggplot(aes(x = predictions, y = price)) +
   geom_point(color = 'blue', size = 1, shape = 16, alpha = 0.7, show.legend=FALSE, na.rm=TRUE) +
   geom_segment(aes(x = 0, y = 0, xend = 350, yend =350), size=0.5, color = 'red', linetype=2) +
