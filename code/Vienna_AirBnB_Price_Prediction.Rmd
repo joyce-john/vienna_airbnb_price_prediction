@@ -755,11 +755,12 @@ To get an idea of which predictors were most impactful in the LASSO model, I loo
 ```{r top coefficients for LASSO}
 
 # get the coefficients from the LASSO model
-lasso_coeffs <- coef(lasso_1$finalModel, lasso_1$bestTune$lambda) %>%
+lasso_coeffs <- 
+  coef(lasso_1$finalModel, lasso_1$bestTune$lambda) %>%
   as.matrix() %>%
   as.data.frame() %>%
   rownames_to_column(var = "variable") %>%
-  rename(coefficient = `1`)  # the column has a name "1", to be renamed
+  rename(coefficient = `s1`)  # the column has a name "s1", to be renamed
 
 # get the top 10 LASSO coefficients
 lasso_top10_coef <-
