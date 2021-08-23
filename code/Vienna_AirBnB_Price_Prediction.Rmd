@@ -15,6 +15,7 @@ output:
 
 # show code but not console output in report
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+options(digits = 3)
 
 ```
 
@@ -39,6 +40,7 @@ library(caret)
 library(ranger)
 library(glmnet)
 library(e1071)
+library(ggpubr)
 
 # load data
 df <- read_csv(paste0(raw_data_dir,'listings.csv.gz'))
@@ -138,7 +140,8 @@ The client's apartments all have at least one bathroom. We can filter out the sm
 # extract number of bathrooms from string column, store in numeric column
 df <-
   df %>% 
-  mutate(bathrooms = str_extract(bathrooms_text, '\\d\\.*\\d*')) 
+  mutate(bathrooms = as.numeric(str_extract(bathrooms_text, '\\d\\.*\\d*'))) 
+
 
 # add flag for shared bathrooms
 df <- 
@@ -441,7 +444,7 @@ The data needs to be split into training and test sets. I'll use 80% of the data
 ```{r create tranining and test sets}
 
 # set the seed for reproducibility
-set.seed(1991)
+set.seed(2020)
 
 # create an index for splitting the data. let's do a classic 80/20 split
 # use as.integer() to coerce the matrix into a vector
@@ -562,9 +565,9 @@ tune_grid_rf_full <- expand.grid(
   .min.node.size = c(5, 10)
 )
 
-# setting train control for RF - the same as previous train control but with verboseIter = TRUE
-# so I can see the progress running in the console
-train_control_rf <- trainControl(method = "cv", number = 5, verboseIter = TRUE)
+# setting train control for RF - the same as previous train control but you should set verboseIter = TRUE
+# if you want to see the progress running in the console
+train_control_rf <- trainControl(method = "cv", number = 5, verboseIter = FALSE)
 
 
 ```  
@@ -621,6 +624,10 @@ lasso_1 <- caret::train(formula_3,
 # Random Forest
 
 # first train a simple model only using basic property stats
+
+
+set.seed(2020)
+
 rf_1 <- train(
   formula_1,
   data = train_set,
@@ -631,6 +638,9 @@ rf_1 <- train(
 )
 
 # second train a complex model using all features (but not interactions, as decision trees uncover these independently)
+
+set.seed(2020)
+
 rf_2 <- train(
   formula_2,
   data = train_set,
@@ -707,10 +717,9 @@ I do some model diagnostics as a sanity check. I examine the **random forest (fu
 
 ## Y vs Y-hat Plots
 
-The Y/Y-hat plot shows how predicted values differ from actual values. If we could create a perfect model, all points would lie on the dotted 45 degree line.  
+The Y/Y-hat plots shows how predicted values differ from actual values. If we could create a perfect model, all points would lie on the dotted 45 degree line.  We see that expensive units are an area of weakness for both models.  
 
-We see that expensive units are a point of weakness for both models. The points in the upper left quadrant represent observations where the true price (y axis) was fairly high, but the price predicted by our model (x axis) was significantly lower. Also, make note of the lower right quadrant in both charts: beyond €150, the random forest model hardly ever predicted a price that was too high compared to the true price. The LASSO model committed such errors occasionally. It seems our best model is a bit conservative with its valuation of luxury units.  
-
+   
 ```{r y y-hat plots for LASSO and RF}
 
 # LASSO - scatterplot of predicted VS actual values
@@ -739,6 +748,7 @@ rf_2_pred_vs_actual <-
   labs(title = 'Random Forest (full model)', y = "Price (EUR)", x = "Predicted price  (EUR)") +
   theme(plot.title = element_text(hjust = 0.5))
 
+
 # show LASSO scatter
 lasso_pred_vs_actual
 
@@ -747,10 +757,13 @@ rf_2_pred_vs_actual
 
 
 ```  
-
+  
+In fact, the random forest model is clearly a bit conservative in the valuation of high-end AirBnB units. The points in the upper left quadrant represent observations where the true price (y axis) was fairly high, but the price predicted by our model (x axis) was significantly lower. But beyond €150 on the x axis, there are only a few points *under* the dotted line - meaning fairly few errors where the model overpriced a unit. So when it comes to the high-end segment, we may suspect that our best model has a negative bias. 
+  
+  
 ## Top Coefficients in the LASSO Model
 
-To get an idea of which predictors were most impactful in the LASSO model, I look at the top 10 largest coefficient values.
+To get an idea of which predictors were most impactful in the LASSO model, I look at the top 10 largest coefficient values. The interaction terms including **neighbourhood** were very important.  
 
 ```{r top coefficients for LASSO}
 
@@ -762,14 +775,19 @@ lasso_coeffs <-
   rownames_to_column(var = "variable") %>%
   rename(coefficient = `s1`)  # the column has a name "s1", to be renamed
 
-# get the top 10 LASSO coefficients
+# get the top 10 LASSO coefficients with clean names
 lasso_top10_coef <-
   lasso_coeffs %>% 
   arrange(desc(coefficient)) %>% 
+  mutate(variable = gsub('neighbourhood_cleansedInnere Stadt:bathrooms', 'neighbourhood: Innere Stadt * bathrooms', variable)) %>% 
+  mutate(variable = gsub('neighbourhood_cleansedInnere Stadt:bedrooms3', 'neighbourhood: Innere Stadt * bedrooms3', variable)) %>% 
+  mutate(variable = gsub('neighbourhood_cleansedInnere Stadt:bedrooms2', 'neighbourhood: Innere Stadt * bedrooms2', variable)) %>% 
   head(., n = 10)
 
 # view the top 10 LASSO coefficients
-lasso_top10_coef
+lasso_top10_coef %>% 
+  kable() %>% 
+  kable_material(c("striped", "hover"))
 
 
 
@@ -786,9 +804,7 @@ rf_2_var_imp <- importance(rf_2$finalModel)/1000
 rf_2_var_imp_df <-
   data.frame(varname = names(rf_2_var_imp), imp = rf_2_var_imp) %>%
   mutate(varname = gsub("room_typePrivate room", "room type: private room", varname) ) %>%
-  mutate(varname = gsub("bedrooms2", "bedrooms: 2", varname) ) %>%
-  mutate(varname = gsub("neighbourhood_cleansedInnere Stadt:bathrooms", "Innere Stadt * bathrooms", varname) ) %>%
-  mutate(varname = gsub("neighbourhood_cleansedInnere Stadt:accommodates", "Innere Stadt * accommodates", varname) ) %>%
+  mutate(varname = gsub("neighbourhood_cleansedInnere Stadt", "neighbourhood: Innere Stadt", varname) ) %>%
   arrange(desc(imp)) %>%
   mutate(imp_percentage = imp/sum(imp))
 
@@ -814,7 +830,7 @@ rf_2_var_imp_plot
 
 ## Partial Dependence Plots for Random Forest
 
-A partial dependence plot offers some insight into the relationship between a single *x* and the random forest's predicted *y* value.
+A partial dependence plot offers some insight into the relationship between a single *x* and the random forest's predicted *y* value. You can see that there isn't much of a difference between having the capacity to accommodate two people VS three, but that capacity for each additional person past three is associated with significantly higher price. The PDP plot for bathrooms has a different shape, but possibly points to a similar principle: facilities that can serve groups, or possibly just larger apartments, may be associated with higher prices.  
 
 ```{r partial dependence plots for random forest}
 
@@ -854,13 +870,13 @@ pdp_bathrooms_plot
 
 ## Comparison of Important Variables
 
-Take a look at the top LASSO coefficients and the top features in terms of **variable importance** from the random forest model. The two methods have some similarities in terms of which *x* variables are most useful in predicting nightly price.
+Take a look at the top LASSO coefficients and the top features in terms of **variable importance** from the random forest model. The two methods have some similarities in terms of which *x* variables are most useful in predicting nightly price. In both models, the **Innere Stadt** neighbourhood seems to be associated with higher prices. (*Innere Stadt* means *inner city* in German, so this is fairly intuitive.)  
 
 ```{r top 10 variables LASSO vs RF}
 
 # make a table for comparing most important variables in the top two models
 top10_compare <-
-  data.frame('LASSO' = lasso_top10_coef_clean$variable, 
+  data.frame('LASSO' = lasso_top10_coef$variable, 
              'Random Forest' = rf_2_var_imp_df$varname[1:10])
 
 # show the table
@@ -872,9 +888,9 @@ top10_compare %>%
 
 # Conclusion
 
-```{r}
+The model I built is decent, but not perfect. The best model achieved an RMSE of `r RMSE(predictions_rf2, test_set$price)` and a mean average error of `r MAE(predictions_rf2, test_set$price)`.  
 
-###TODO: include RMSE, MAE in conclusion text - MAE for interpretability
+It may have been possible to improve my model's performance further by including information from the various **review scores** variables, but I am highly skeptical of the idea of imputing these values for the client's apartments. The model would have appeared better on paper, but it may have resulted in worse predictions for the client if we incorrectly guess what the client's **review scores** should be.  
+  
+As for the client's use of the model: I would propose using the model as a starting point for setting prices. It may be a valuable complement to the client's domain expertise, but it is only a decent performer *on average*, and it would be wise to consider individual price adjustments if the prediction appears unreasonable. This is particularly true of more expensive units.  
 
-
-```
